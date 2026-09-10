@@ -1,6 +1,6 @@
 dpo-gpt2-output*/
 dpo-qwen*-output*/
-dpo-qwen15b-lora-helpful/
 *.safetensors
+!dpo-qwen15b-lora-helpful/*.safetensors
 __pycache__/
 *.pyc
