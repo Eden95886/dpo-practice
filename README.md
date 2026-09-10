@@ -1,5 +1,7 @@
 # DPO 실습
 
+GitHub: https://github.com/Eden95886/dpo-practice
+
 Anthropic/hh-rlhf 데이터셋으로 DPO(Direct Preference Optimization)를 실습한 기록.
 모델 가중치(수 GB~수십 GB)는 크기 때문에 이 저장소에 포함하지 않았고, 스크립트/학습 로그/결과 그래프만 커밋되어 있다.
 
