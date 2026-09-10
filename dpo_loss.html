@@ -1,0 +1,325 @@
+<title>DPO Practice Loss</title>
+<style>
+  .viz-root {
+    color-scheme: light;
+    --surface-1:      #fcfcfb;
+    --page:           #f9f9f7;
+    --text-primary:   #0b0b0b;
+    --text-secondary: #52514e;
+    --text-muted:     #898781;
+    --grid:           #e1e0d9;
+    --baseline:       #c3c2b7;
+    --border:         rgba(11,11,11,0.10);
+    --series-1:       #2a78d6; /* harmless-only */
+    --series-2:       #eb6834; /* helpful-only */
+    --series-3:       #1baf7a; /* mixed (balanced, shuffled) */
+    --series-4:       #eda100; /* mixed (batch-alternating) */
+    --series-5:       #e87ba4; /* curriculum: helpful -> harmless */
+    --series-6:       #008300; /* Qwen2.5-1.5B + LoRA DPO (helpful-only) */
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:where(:not([data-theme="light"])) .viz-root {
+      color-scheme: dark;
+      --surface-1:      #1a1a19;
+      --page:           #0d0d0d;
+      --text-primary:   #ffffff;
+      --text-secondary: #c3c2b7;
+      --text-muted:     #898781;
+      --grid:           #2c2c2a;
+      --baseline:       #383835;
+      --border:         rgba(255,255,255,0.10);
+      --series-1:       #3987e5;
+      --series-2:       #d95926;
+      --series-3:       #199e70;
+      --series-4:       #c98500;
+      --series-5:       #d55181;
+      --series-6:       #008300;
+    }
+  }
+  :root[data-theme="dark"] .viz-root {
+    color-scheme: dark;
+    --surface-1:      #1a1a19;
+    --page:           #0d0d0d;
+    --text-primary:   #ffffff;
+    --text-secondary: #c3c2b7;
+    --text-muted:     #898781;
+    --grid:           #2c2c2a;
+    --baseline:       #383835;
+    --border:         rgba(255,255,255,0.10);
+    --series-1:       #3987e5;
+    --series-2:       #d95926;
+    --series-3:       #199e70;
+    --series-4:       #c98500;
+    --series-5:       #d55181;
+    --series-6:       #008300;
+  }
+
+  body { background: var(--page); font-family: system-ui, -apple-system, "Segoe UI", sans-serif; }
+  .viz-root { max-width: 780px; margin: 32px auto; padding: 24px 28px 20px; background: var(--surface-1);
+    border: 1px solid var(--border); border-radius: 12px; color: var(--text-primary); }
+  h1 { font-size: 17px; margin: 0 0 4px; }
+  .sub { font-size: 13px; color: var(--text-secondary); margin: 0 0 18px; }
+
+  .legend { display: flex; flex-wrap: wrap; gap: 18px; font-size: 12px; color: var(--text-secondary); margin: 4px 0 10px; }
+  .legend-item { display: flex; align-items: center; gap: 6px; }
+  .swatch { width: 10px; height: 10px; border-radius: 2px; }
+
+  svg { width: 100%; height: auto; overflow: visible; }
+  .axis-label { font-size: 11px; fill: var(--text-muted); }
+  .grid-line { stroke: var(--grid); stroke-width: 1; }
+  .baseline { stroke: var(--baseline); stroke-width: 1; }
+  .series-label { font-size: 11px; font-weight: 600; }
+
+  .hover-line { stroke: var(--baseline); stroke-width: 1; stroke-dasharray: 3 3; opacity: 0; pointer-events: none; }
+  .hover-dot { opacity: 0; pointer-events: none; }
+
+  .tooltip {
+    position: absolute; pointer-events: none; opacity: 0; transition: opacity .1s;
+    background: var(--surface-1); border: 1px solid var(--border); border-radius: 8px;
+    padding: 8px 10px; font-size: 12px; color: var(--text-primary); box-shadow: 0 4px 14px rgba(0,0,0,.12);
+    white-space: nowrap;
+  }
+  .tooltip .t-title { color: var(--text-muted); font-size: 11px; margin-bottom: 3px; }
+  .tooltip .t-row { display: flex; align-items: center; gap: 6px; }
+  .tooltip .t-row + .t-row { margin-top: 2px; }
+  .tooltip .t-dot { width: 7px; height: 7px; border-radius: 50%; flex: none; }
+
+  .summary-table { margin-top: 18px; }
+  table { border-collapse: collapse; font-size: 12px; width: 100%; }
+  th, td { text-align: right; padding: 5px 8px; border-bottom: 1px solid var(--grid); font-variant-numeric: tabular-nums; }
+  th:first-child, td:first-child { text-align: left; }
+  th { color: var(--text-muted); font-weight: 500; }
+
+  details { margin-top: 14px; }
+  summary { font-size: 12px; color: var(--text-muted); cursor: pointer; }
+
+  .note { font-size: 11.5px; color: var(--text-muted); margin-top: 14px; line-height: 1.6; }
+  .note b { color: var(--text-secondary); }
+</style>
+
+<div class="viz-root" id="root">
+  <h1>DPO 실습: 데이터 조합 5가지 + 모델 규모 비교</h1>
+  <p class="sub">Anthropic/hh-rlhf · eval loss 비교 (gpt2 124M은 full FT, Qwen2.5-1.5B은 LoRA)</p>
+
+  <div class="legend">
+    <div class="legend-item"><span class="swatch" style="background:var(--series-1)"></span>gpt2: harmless-only</div>
+    <div class="legend-item"><span class="swatch" style="background:var(--series-2)"></span>gpt2: helpful-only</div>
+    <div class="legend-item"><span class="swatch" style="background:var(--series-3)"></span>gpt2: mixed (예제 셔플)</div>
+    <div class="legend-item"><span class="swatch" style="background:var(--series-4)"></span>gpt2: mixed (step 번갈아)</div>
+    <div class="legend-item"><span class="swatch" style="background:var(--series-5)"></span>gpt2: curriculum (helpful→harmless)</div>
+    <div class="legend-item"><span class="swatch" style="background:var(--series-6)"></span>Qwen2.5-1.5B + LoRA (helpful-only)</div>
+  </div>
+
+  <div style="position:relative">
+    <svg id="chart" viewBox="0 0 720 320" preserveAspectRatio="xMidYMid meet"></svg>
+    <div class="tooltip" id="tooltip"></div>
+  </div>
+
+  <div class="summary-table">
+    <table>
+      <tr><th>실험</th><th>학습시간</th><th>중단 step</th><th>best eval loss</th></tr>
+      <tr><td>harmless-only</td><td>18분 52초</td><td>700 / 2,250</td><td>0.638 @ step 550</td></tr>
+      <tr><td>helpful-only</td><td>35분 20초</td><td>400 / 2,250</td><td>0.624 @ step 300</td></tr>
+      <tr><td>mixed (예제 셔플)</td><td>6분 06초</td><td>200 / 2,250</td><td>0.694 @ step 50 (≈ 랜덤 수준)</td></tr>
+      <tr><td>mixed (step 번갈아)</td><td>11분 30초</td><td>400 / 2,244</td><td>0.670 @ step 250</td></tr>
+      <tr><td>curriculum (helpful→harmless)</td><td>6분 00초</td><td>200 / 2,250</td><td>0.716 @ step 50 (계속 악화)</td></tr>
+      <tr><td>Qwen2.5-1.5B + LoRA (helpful-only)</td><td>44분 23초</td><td>275 / 500</td><td><b>0.589</b> @ step 200</td></tr>
+    </table>
+  </div>
+
+  <details>
+    <summary>표로 보기 (전체 데이터)</summary>
+    <table id="data-table"></table>
+  </details>
+
+  <p class="note">
+    <b>curriculum(helpful 체크포인트 → harmless 이어서 학습)은 5가지 중 가장 나쁜 결과였습니다.</b>
+    helpful-only best 체크포인트(step 300)에서 시작해 harmless-base 3,000개로 이어서 학습하고,
+    combined eval(helpful+harmless 150+150)로 평가했더니 eval loss가 처음부터 0.716이었고
+    step 50 → 200 동안 0.716 → 0.752로 <b>계속 악화</b>되며 3연속 미개선으로 조기 종료됐습니다.
+    harmless 쪽 train loss/accuracy는 나아지고 있었지만(0.68→0.64, acc 0.5→0.66대), combined eval은
+    같이 좋아지지 않았습니다 — helpful 체크포인트가 가진 "직접 답하기" 성향이 harmless 방향으로 급격히
+    끌려가면서 예전에 학습한 helpful 능력을 빠르게 잊어버리는 <b>catastrophic forgetting</b>이
+    일어난 것으로 보입니다.<br><br>
+    5가지 조합 최종 정리 (best eval loss, 낮을수록 좋음): <b>helpful-only 0.624 &lt; harmless-only 0.638
+    &lt; step-단위 번갈아 0.670 &lt; mixed 예제 셔플 0.694 &lt; curriculum 0.716(계속 악화 중 중단)</b>.
+    단일 목표 학습이 가장 안정적이고, 목표를 섞으려는 시도는 섞는 "단위"가 클수록(step &gt; 예제) 조금 낫지만,
+    순차 curriculum은 이 세팅(같은 LR 5e-6, 낮은 모델 용량)에서는 오히려 최악이었습니다. curriculum을
+    살리려면 stage 2에서 학습률을 크게 낮추거나(예: 1e-6), stage 2 데이터에 helpful 예제를 일부
+    리허설(rehearsal)로 섞어 망각을 막는 방법을 다음에 시도해볼 수 있습니다.<br><br>
+    <b>모델을 키우니(gpt2 124M → Qwen2.5-1.5B, 12배) 압도적으로 좋아졌습니다.</b> LoRA로 helpful-base만
+    학습했는데 best eval loss <b>0.589</b>로 gpt2 helpful-only(0.624)보다 낮고, 학습 데이터는 3분의 1(1,000개)
+    수준인데도 더 적은 step(200)에서 도달했습니다. 실제 생성 품질 차이는 더 극명합니다 — gpt2는 "acting
+    skills"나 "teaspoon baking soda"를 계속 반복하는 문제가 있었는데, Qwen2.5-1.5B는 base 모델부터 이미
+    반복 없이 사실에 가까운 완결된 문장을 만들고, LoRA DPO 이후엔 화재 진화·스무디 레시피 같은 질문에
+    번호/불릿 목록으로 더 "도움이 되는" 형식으로 답이 바뀌는 게 눈에 띕니다. 즉 이전에 확인했던 반복/헛소리
+    문제는 DPO 레시피의 결함이 아니라 <b>gpt2(124M)라는 base 모델 자체의 표현력 한계</b>였다는 게
+    확인됐습니다. (다만 프롬프트를 학습 때와 동일하게 raw "Human/Assistant" 텍스트로 넣었고 Qwen 전용
+    chat template은 쓰지 않았다는 점, 그리고 한 프롬프트에서 LoRA 모델이 "window" 한 단어로 비정상적으로
+    짧게 끊긴 경우가 있었다는 점은 한계로 남습니다.)
+  </p>
+</div>
+
+<script>
+(function () {
+  const SERIES = [
+    {
+      key: 'harmless', label: 'harmless-only', color: '--series-1',
+      eval: [[49, 0.6685], [101, 0.6572], [150, 0.6633], [199, 0.6559], [251, 0.6564], [300, 0.6495], [349, 0.6479], [401, 0.6419], [450, 0.6452], [499, 0.6424], [551, 0.6384], [600, 0.6428], [649, 0.6428], [701, 0.6459]],
+    },
+    {
+      key: 'helpful', label: 'helpful-only', color: '--series-2',
+      eval: [[49, 0.6505], [101, 0.6373], [150, 0.6448], [199, 0.633], [251, 0.6244], [300, 0.6244], [349, 0.6275], [401, 0.6257]],
+    },
+    {
+      key: 'mixed', label: 'mixed (예제 셔플)', color: '--series-3',
+      eval: [[49, 0.6943], [101, 0.6989], [150, 0.6949], [199, 0.6966]],
+    },
+    {
+      key: 'alternating', label: 'mixed (step 번갈아)', color: '--series-4',
+      eval: [[49, 0.6845], [101, 0.6803], [150, 0.6753], [198, 0.6733], [251, 0.6704], [299, 0.6809], [352, 0.6895], [400, 0.6807]],
+    },
+    {
+      key: 'curriculum', label: 'curriculum (helpful→harmless)', color: '--series-5',
+      eval: [[49, 0.7164], [101, 0.7174], [150, 0.7452], [199, 0.7523]],
+    },
+    {
+      key: 'qwen', label: 'Qwen2.5-1.5B + LoRA', color: '--series-6',
+      eval: [[25, 0.68], [50, 0.6715], [75, 0.6619], [100, 0.6445], [125, 0.6243], [150, 0.6045], [175, 0.6022], [200, 0.5894], [225, 0.5922], [250, 0.5908], [275, 0.6234]],
+    },
+  ];
+
+  const root = document.getElementById('root');
+  const cs = getComputedStyle(root);
+  SERIES.forEach(s => s.hex = cs.getPropertyValue(s.color).trim());
+
+  const W = 720, H = 320, M = { l: 46, r: 16, t: 16, b: 32 };
+  const plotW = W - M.l - M.r, plotH = H - M.t - M.b;
+
+  const allX = SERIES.flatMap(s => s.eval.map(d => d[0]));
+  const allY = SERIES.flatMap(s => s.eval.map(d => d[1]));
+  const xMin = 0, xMax = Math.max(...allX);
+  const yMin = Math.floor(Math.min(...allY) * 50) / 50 - 0.005;
+  const yMax = Math.ceil(Math.max(...allY) * 50) / 50 + 0.005;
+
+  const x = v => M.l + (v - xMin) / (xMax - xMin) * plotW;
+  const y = v => M.t + (1 - (v - yMin) / (yMax - yMin)) * plotH;
+
+  const svgns = 'http://www.w3.org/2000/svg';
+  const svg = document.getElementById('chart');
+  svg.setAttribute('viewBox', `0 0 ${W} ${H}`);
+
+  function el(tag, attrs) {
+    const e = document.createElementNS(svgns, tag);
+    for (const k in attrs) e.setAttribute(k, attrs[k]);
+    return e;
+  }
+
+  // gridlines (y)
+  const yTicks = 6;
+  for (let i = 0; i <= yTicks; i++) {
+    const v = yMin + (yMax - yMin) * i / yTicks;
+    const gy = y(v);
+    svg.appendChild(el('line', { x1: M.l, x2: W - M.r, y1: gy, y2: gy, class: 'grid-line' }));
+    const label = el('text', { x: M.l - 8, y: gy + 3, class: 'axis-label', 'text-anchor': 'end' });
+    label.textContent = v.toFixed(3);
+    svg.appendChild(label);
+  }
+  // x ticks
+  [0, 100, 200, 300, 400, 500, 600, 700].forEach(v => {
+    const gx = x(v);
+    const label = el('text', { x: gx, y: H - M.b + 16, class: 'axis-label', 'text-anchor': 'middle' });
+    label.textContent = 'step ' + v;
+    svg.appendChild(label);
+  });
+  svg.appendChild(el('line', { x1: M.l, x2: W - M.r, y1: H - M.b, y2: H - M.b, class: 'baseline' }));
+
+  function linePath(data) {
+    return data.map((d, i) => (i === 0 ? 'M' : 'L') + x(d[0]) + ',' + y(d[1])).join(' ');
+  }
+
+  SERIES.forEach(s => {
+    const path = el('path', {
+      d: linePath(s.eval), fill: 'none', stroke: s.hex, 'stroke-width': 2,
+      'stroke-linecap': 'round', 'stroke-linejoin': 'round',
+    });
+    svg.appendChild(path);
+    s.eval.forEach(d => svg.appendChild(el('circle', { cx: x(d[0]), cy: y(d[1]), r: 4, fill: s.hex })));
+
+    // direct end-label (relief rule for low-contrast series + selective labeling)
+    const last = s.eval[s.eval.length - 1];
+    const labelEl = el('text', {
+      x: x(last[0]) + 8, y: y(last[1]) + 4, class: 'series-label', fill: s.hex,
+    });
+    labelEl.textContent = s.label;
+    svg.appendChild(labelEl);
+  });
+
+  // hover layer
+  const hoverLine = el('line', { class: 'hover-line', y1: M.t, y2: H - M.b });
+  svg.appendChild(hoverLine);
+  const hoverDots = {};
+  SERIES.forEach(s => {
+    hoverDots[s.key] = el('circle', { class: 'hover-dot', r: 6, fill: 'none', stroke: s.hex, 'stroke-width': 2 });
+    svg.appendChild(hoverDots[s.key]);
+  });
+
+  const hitArea = el('rect', { x: M.l, y: M.t, width: plotW, height: plotH, fill: 'transparent' });
+  svg.appendChild(hitArea);
+
+  const tooltip = document.getElementById('tooltip');
+
+  function nearest(data, targetStep) {
+    return data.reduce((a, b) => Math.abs(b[0] - targetStep) < Math.abs(a[0] - targetStep) ? b : a);
+  }
+
+  hitArea.addEventListener('mousemove', (ev) => {
+    const rect = svg.getBoundingClientRect();
+    const scale = W / rect.width;
+    const mx = (ev.clientX - rect.left) * scale;
+    const step = xMin + (mx - M.l) / plotW * (xMax - xMin);
+
+    let rows = '';
+    let refStep = null;
+    SERIES.forEach(s => {
+      if (step > s.eval[s.eval.length - 1][0] + 25) {
+        hoverDots[s.key].style.opacity = 0;
+        return;
+      }
+      const p = nearest(s.eval, step);
+      if (refStep === null) refStep = p[0];
+      hoverDots[s.key].setAttribute('cx', x(p[0]));
+      hoverDots[s.key].setAttribute('cy', y(p[1]));
+      hoverDots[s.key].style.opacity = 1;
+      rows += `<div class="t-row"><span class="t-dot" style="background:${s.hex}"></span>${s.label} ${p[1].toFixed(4)}</div>`;
+    });
+    if (refStep !== null) {
+      hoverLine.setAttribute('x1', x(refStep));
+      hoverLine.setAttribute('x2', x(refStep));
+      hoverLine.style.opacity = 1;
+      tooltip.innerHTML = `<div class="t-title">step ${refStep}</div>` + rows;
+      const rootRect = root.getBoundingClientRect();
+      tooltip.style.left = (ev.clientX - rootRect.left + 14) + 'px';
+      tooltip.style.top = (ev.clientY - rootRect.top - 50) + 'px';
+      tooltip.style.opacity = 1;
+    }
+  });
+  hitArea.addEventListener('mouseleave', () => {
+    tooltip.style.opacity = 0;
+    hoverLine.style.opacity = 0;
+    SERIES.forEach(s => hoverDots[s.key].style.opacity = 0);
+  });
+
+  // table view (accessibility)
+  const table = document.getElementById('data-table');
+  const rows = [...new Set(SERIES.flatMap(s => s.eval.map(d => d[0])))].sort((a, b) => a - b);
+  let html = '<tr><th>step</th>' + SERIES.map(s => `<th>${s.label}</th>`).join('') + '</tr>';
+  rows.forEach(step => {
+    html += `<tr><td>${step}</td>` + SERIES.map(s => {
+      const p = s.eval.find(d => d[0] === step);
+      return `<td>${p ? p[1].toFixed(4) : '—'}</td>`;
+    }).join('') + '</tr>';
+  });
+  table.innerHTML = html;
+})();
+</script>
