@@ -55,3 +55,16 @@ Anthropic/hh-rlhf 데이터셋으로 DPO(Direct Preference Optimization)를 실�
    두 목표를 동시에 잘 학습시키기 어려웠다. step 단위로 소스를 번갈아 넣는 방식이 셔플보다는 나았다.
 3. gpt2(124M)에서 관찰된 응답 반복/헛소리 문제는 DPO 방법론의 결함이 아니라 base 모델 자체의
    표현력 한계였다 — Qwen2.5-1.5B + LoRA로 같은 레시피를 재현하자 훨씬 안정적인 결과를 얻었다.
+
+## 영어 Wikipedia (이어서 할 작업)
+
+`wikipedia/` — Hugging Face `wikimedia/wikipedia` / `20231101.en` 메모와 스트리밍 스크립트.
+
+- 2023-11-01 영어 위키 덤프. 약 641만 문서, 11.6GB. 필드는 `id`, `url`, `title`, `text`.
+- Windows PC에서 `streaming=True`로 첫 문서(`Anarchism`)까지 확인함. 전체 다운로드는 하지 않음.
+- 영어판은 용량 때문에 익명이면 403이 나기 쉬움. Hugging Face 로그인 필요.
+- Windows PC는 CUDA GPU가 없어서 Qwen+LoRA 학습은 비추천. 맥북(MPS)에서 소량 샘플로 이어가는 용도.
+
+```bash
+python wikipedia/stream_wikipedia.py --n 20
+```
